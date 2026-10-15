@@ -4,49 +4,244 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Открыть в приложении</title>
+<title>Relink — открыть ссылку в приложении</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.4 system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box; }
-  main { max-width: 360px; width: 100%; text-align: center; }
-  a.btn { display: block; margin: 12px 0; padding: 14px; border-radius: 12px; background: #2481cc; color: #fff; text-decoration: none; font-weight: 600; }
-  a.btn.alt { background: transparent; color: inherit; border: 1px solid currentColor; opacity: .8; }
-  [hidden] { display: none; }
+  :root { color-scheme: light dark; --accent: #2481cc; --muted: #8a8f98; --border: #c9ced6; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.4 system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  main { max-width: 420px; width: 100%; }
+  h1 { font-size: 22px; text-align: center; margin: 0 0 16px; }
+  .btn { display: block; width: 100%; margin: 10px 0; padding: 14px; border-radius: 12px; border: 0; background: var(--accent); color: #fff; text-decoration: none; text-align: center; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn.alt { background: transparent; color: inherit; border: 1px solid var(--border); }
+  input[type=text] { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--border); font: inherit; background: transparent; color: inherit; }
+  input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .label { font-size: 13px; color: var(--muted); margin: 16px 0 4px; }
+  .out { word-break: break-all; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); font: 14px/1.4 ui-monospace, monospace; }
+  .err { color: #d33; margin: 10px 0; text-align: center; }
+  .hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 16px; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
-  <h1 id="title">Открываю приложение…</h1>
-  <p id="msg" hidden>Если ничего не произошло — приложение не установлено или браузер заблокировал переход.</p>
-  <a id="open" class="btn" hidden>Открыть в приложении</a>
-  <a id="web" class="btn alt" hidden>Открыть в браузере</a>
-  <p id="err" hidden>Некорректная ссылка.</p>
+  <!-- Redirect mode: opened with #to=...&web=... -->
+  <section id="redirect" hidden>
+    <h1 id="rTitle">Открываю приложение…</h1>
+    <p id="rMsg" class="hint" hidden>Если ничего не произошло — приложение не установлено или браузер заблокировал переход.</p>
+    <a id="rOpen" class="btn" hidden>Открыть в приложении</a>
+    <a id="rWeb" class="btn alt" hidden>Открыть в браузере</a>
+    <a id="rBack" class="btn alt" href="./">Создать свою ссылку</a>
+  </section>
+
+  <!-- Generator mode: opened without parameters -->
+  <section id="gen" hidden>
+    <h1>Открыть ссылку в приложении</h1>
+    <form id="form" autocomplete="off">
+      <input id="url" type="text" inputmode="url" placeholder="Вставьте ссылку, например https://music.yandex.ru/…" autofocus>
+      <button class="btn" type="submit">Сгенерировать</button>
+    </form>
+    <p id="genErr" class="err" hidden></p>
+    <div id="result" hidden>
+      <div class="label" id="service"></div>
+      <div class="label">Ссылка для отправки (откроет приложение по клику)</div>
+      <div class="out" id="shareOut"></div>
+      <a id="open" class="btn">Открыть в приложении</a>
+      <button id="copyShare" class="btn alt" type="button">Скопировать ссылку</button>
+      <div class="label">Прямая ссылка приложения</div>
+      <div class="out" id="deepOut"></div>
+      <button id="copyDeep" class="btn alt" type="button">Скопировать deeplink</button>
+    </div>
+    <p class="hint">Яндекс Музыка, Figma, Spotify, YouTube, Apple Music, Telegram, Notion, Zoom, Slack, Discord, Steam, VK, Instagram, X, Linear</p>
+  </section>
 </main>
 <script>
-  // Keep in sync with ALLOWED_SCHEMES in src/links/rules.ts
+(function () {
+  // ---- Rules. Keep in sync with src/links/rules.ts ----
+  function hostIs(url) {
+    var h = url.hostname.toLowerCase().replace(/^(www|m)\./, '');
+    for (var i = 1; i < arguments.length; i++) {
+      var x = arguments[i];
+      if (h === x || h.slice(-(x.length + 1)) === '.' + x) return true;
+    }
+    return false;
+  }
+  function segs(url) { return url.pathname.split('/').filter(Boolean); }
+  function num(s) { return /^\d+$/.test(s || ''); }
+
+  var RULES = [
+    { name: 'Яндекс Музыка', convert: function (u) {
+      if (!hostIs(u, 'music.yandex.ru', 'music.yandex.com', 'music.yandex.by', 'music.yandex.kz', 'music.yandex.uz')) return null;
+      var s = segs(u);
+      if (['album', 'artist', 'track', 'users'].indexOf(s[0]) > -1 && s.length > 1) return 'yandexmusic://' + s.join('/');
+      if (s[0] === 'playlists' && s[1]) return 'yandexmusic://playlist/' + s[1];
+      return null;
+    } },
+    { name: 'Figma', convert: function (u) {
+      if (!hostIs(u, 'figma.com')) return null;
+      var s = segs(u);
+      if (['file', 'design', 'board', 'proto', 'slides', 'make'].indexOf(s[0]) > -1 && s[1]) {
+        var n = u.searchParams.get('node-id');
+        return 'figma://' + (s[0] === 'proto' ? 'file' : s[0]) + '/' + s[1] + (n ? '?node-id=' + encodeURIComponent(n) : '');
+      }
+      return null;
+    } },
+    { name: 'Spotify', convert: function (u) {
+      if (!hostIs(u, 'open.spotify.com')) return null;
+      var s = segs(u).filter(function (x) { return !/^intl-/.test(x); });
+      if (['track', 'album', 'artist', 'playlist', 'episode', 'show', 'user'].indexOf(s[0]) > -1 && s[1]) return 'spotify:' + s[0] + ':' + s[1];
+      return null;
+    } },
+    { name: 'YouTube', convert: function (u) {
+      var id = null, s;
+      if (hostIs(u, 'youtu.be')) id = segs(u)[0] || null;
+      else if (hostIs(u, 'youtube.com', 'music.youtube.com')) {
+        s = segs(u);
+        if (s[0] === 'watch') id = u.searchParams.get('v');
+        else if (['shorts', 'live', 'embed'].indexOf(s[0]) > -1) id = s[1] || null;
+      }
+      return id ? 'youtube://www.youtube.com/watch?v=' + encodeURIComponent(id) : null;
+    } },
+    { name: 'Apple Music', convert: function (u) {
+      return hostIs(u, 'music.apple.com') ? 'music://music.apple.com' + u.pathname + u.search : null;
+    } },
+    { name: 'Telegram', convert: function (u) {
+      if (!hostIs(u, 't.me', 'telegram.me')) return null;
+      var s = segs(u);
+      if (!s[0]) return null;
+      if (s[0] === 'joinchat' && s[1]) return 'tg://join?invite=' + s[1];
+      if (s[0].charAt(0) === '+') return 'tg://join?invite=' + s[0].slice(1);
+      if (s[0] === 'addstickers' && s[1]) return 'tg://addstickers?set=' + s[1];
+      return 'tg://resolve?domain=' + s[0] + (num(s[1]) ? '&post=' + s[1] : '');
+    } },
+    { name: 'Notion', convert: function (u) {
+      return hostIs(u, 'notion.so') ? 'notion://www.notion.so' + u.pathname + u.search : null;
+    } },
+    { name: 'Zoom', convert: function (u) {
+      if (!hostIs(u, 'zoom.us', 'zoom.com')) return null;
+      var s = segs(u);
+      if ((s[0] === 'j' || s[0] === 'wc') && num(s[1])) {
+        var p = u.searchParams.get('pwd');
+        return 'zoommtg://zoom.us/join?confno=' + s[1] + (p ? '&pwd=' + encodeURIComponent(p) : '');
+      }
+      return null;
+    } },
+    { name: 'Slack', convert: function (u) {
+      if (!hostIs(u, 'app.slack.com')) return null;
+      var s = segs(u);
+      return s[0] === 'client' && s[1] && s[2] ? 'slack://channel?team=' + s[1] + '&id=' + s[2] : null;
+    } },
+    { name: 'Discord', convert: function (u) {
+      var s;
+      if (hostIs(u, 'discord.gg')) return segs(u)[0] ? 'discord://-/invite/' + segs(u)[0] : null;
+      if (!hostIs(u, 'discord.com', 'discordapp.com')) return null;
+      s = segs(u);
+      if (s[0] === 'channels' && s.length > 1) return 'discord://-/' + s.join('/');
+      if (s[0] === 'invite' && s[1]) return 'discord://-/invite/' + s[1];
+      return null;
+    } },
+    { name: 'Steam', convert: function (u) {
+      if (!hostIs(u, 'store.steampowered.com')) return null;
+      var s = segs(u);
+      return s[0] === 'app' && num(s[1]) ? 'steam://store/' + s[1] : null;
+    } },
+    { name: 'VK', convert: function (u) {
+      return hostIs(u, 'vk.com', 'vk.ru') && u.pathname.length > 1 ? 'vk://vk.com' + u.pathname + u.search : null;
+    } },
+    { name: 'Instagram', convert: function (u) {
+      if (!hostIs(u, 'instagram.com')) return null;
+      var s = segs(u);
+      return s.length === 1 && ['p', 'reel', 'explore', 'stories'].indexOf(s[0]) === -1 ? 'instagram://user?username=' + s[0] : null;
+    } },
+    { name: 'X (Twitter)', convert: function (u) {
+      if (!hostIs(u, 'x.com', 'twitter.com')) return null;
+      var s = segs(u);
+      if (s[1] === 'status' && num(s[2])) return 'twitter://status?id=' + s[2];
+      return s.length === 1 ? 'twitter://user?screen_name=' + s[0] : null;
+    } },
+    { name: 'Linear', convert: function (u) {
+      return hostIs(u, 'linear.app') && u.pathname.length > 1 ? 'linear:/' + u.pathname + u.search : null;
+    } }
+  ];
   var ALLOWED = ['yandexmusic','figma','spotify','youtube','music','tg','notion','zoommtg','slack','discord','steam','vk','instagram','twitter','linear'];
+
+  function convert(raw) {
+    var u;
+    try { u = new URL(raw.trim()); } catch (e) { return null; }
+    if (!/^https?:$/.test(u.protocol)) return null;
+    for (var i = 0; i < RULES.length; i++) {
+      var d = RULES[i].convert(u);
+      if (d) return { service: RULES[i].name, deeplink: d, original: u.href };
+    }
+    return null;
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function show(id, on) { $(id).hidden = on === false; }
+  function pageBase() { return location.origin + location.pathname; }
+
+  // ---- Redirect mode ----
   var params = new URLSearchParams(location.hash.slice(1));
   var to = params.get('to') || '';
   var web = params.get('web') || '';
-  var scheme = (to.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
   var webOk = /^https?:\/\//i.test(web);
 
-  function show(id) { document.getElementById(id).hidden = false; }
-
-  if (!scheme || ALLOWED.indexOf(scheme.toLowerCase()) === -1) {
-    document.getElementById('title').hidden = true;
-    show('err');
-    if (webOk) { var w = document.getElementById('web'); w.href = web; show('web'); }
-  } else {
-    var open = document.getElementById('open');
-    open.href = to; show('open');
-    if (webOk) { var wb = document.getElementById('web'); wb.href = web; show('web'); }
-    location.href = to;
-    setTimeout(function () {
-      document.getElementById('title').textContent = 'Не открылось?';
-      show('msg');
-    }, 1500);
+  if (to) {
+    show('redirect');
+    var scheme = (to.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+    if (webOk) { $('rWeb').href = web; show('rWeb'); }
+    if (!scheme || ALLOWED.indexOf(scheme.toLowerCase()) === -1) {
+      $('rTitle').textContent = 'Некорректная ссылка';
+    } else {
+      $('rOpen').href = to; show('rOpen');
+      location.href = to;
+      setTimeout(function () {
+        $('rTitle').textContent = 'Не открылось?';
+        show('rMsg');
+      }, 1500);
+    }
+    return;
   }
+
+  // ---- Generator mode ----
+  show('gen');
+  var current = null;
+
+  $('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var r = convert($('url').value);
+    if (!r) {
+      current = null;
+      $('genErr').textContent = 'Эту ссылку я не умею преобразовывать. Проверьте адрес или сервис.';
+      show('genErr'); show('result', false);
+      return;
+    }
+    current = r;
+    var share = pageBase() + '#' + new URLSearchParams({ to: r.deeplink, web: r.original }).toString();
+    r.share = share;
+    show('genErr', false);
+    $('service').textContent = r.service;
+    $('shareOut').textContent = share;
+    $('deepOut').textContent = r.deeplink;
+    $('open').href = r.deeplink;
+    show('result');
+  });
+
+  function copy(text, btn) {
+    var old = btn.textContent;
+    function done() { btn.textContent = 'Скопировано'; setTimeout(function () { btn.textContent = old; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else fallback();
+    function fallback() {
+      var t = document.createElement('textarea');
+      t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(t);
+    }
+  }
+  $('copyShare').addEventListener('click', function () { if (current) copy(current.share, this); });
+  $('copyDeep').addEventListener('click', function () { if (current) copy(current.deeplink, this); });
+})();
 </script>
 </body>
 </html>
