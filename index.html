@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Открыть в приложении</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.4 system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box; }
+  main { max-width: 360px; width: 100%; text-align: center; }
+  a.btn { display: block; margin: 12px 0; padding: 14px; border-radius: 12px; background: #2481cc; color: #fff; text-decoration: none; font-weight: 600; }
+  a.btn.alt { background: transparent; color: inherit; border: 1px solid currentColor; opacity: .8; }
+  [hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Открываю приложение…</h1>
+  <p id="msg" hidden>Если ничего не произошло — приложение не установлено или браузер заблокировал переход.</p>
+  <a id="open" class="btn" hidden>Открыть в приложении</a>
+  <a id="web" class="btn alt" hidden>Открыть в браузере</a>
+  <p id="err" hidden>Некорректная ссылка.</p>
+</main>
+<script>
+  // Keep in sync with ALLOWED_SCHEMES in src/links/rules.ts
+  var ALLOWED = ['yandexmusic','figma','spotify','youtube','music','tg','notion','zoommtg','slack','discord','steam','vk','instagram','twitter','linear'];
+  var params = new URLSearchParams(location.hash.slice(1));
+  var to = params.get('to') || '';
+  var web = params.get('web') || '';
+  var scheme = (to.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+  var webOk = /^https?:\/\//i.test(web);
+
+  function show(id) { document.getElementById(id).hidden = false; }
+
+  if (!scheme || ALLOWED.indexOf(scheme.toLowerCase()) === -1) {
+    document.getElementById('title').hidden = true;
+    show('err');
+    if (webOk) { var w = document.getElementById('web'); w.href = web; show('web'); }
+  } else {
+    var open = document.getElementById('open');
+    open.href = to; show('open');
+    if (webOk) { var wb = document.getElementById('web'); wb.href = web; show('web'); }
+    location.href = to;
+    setTimeout(function () {
+      document.getElementById('title').textContent = 'Не открылось?';
+      show('msg');
+    }, 1500);
+  }
+</script>
+</body>
+</html>
